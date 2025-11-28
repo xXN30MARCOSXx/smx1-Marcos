@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <title>Pong senzill</title>
+  <style>
+    html,body { height:100%; margin:0; background:#111; display:flex; align-items:center; justify-content:center; font-family:system-ui, sans-serif; color:#fff; }
+    canvas { background:#0b0b0b; box-shadow:0 0 20px rgba(0,0,0,.7); }
+    .info { position:fixed; top:12px; text-align:center; width:100%; pointer-events:none; font-size:14px; color:#ddd; }
+    .hint { color:#9ad; }
+  </style>
+</head>
+<body>
+  <div class="info">Fletxes amunt/avall per moure. Arriba a 11 punts. <span class="hint">Prem ESPAI per reiniciar quan acabi</span></div>
+  <canvas id="pong" width="800" height="500"></canvas>
+
+  <script>
+    const canvas = document.getElementById('pong');
+    const ctx = canvas.getContext('2d');
+
+    const P_WIDTH = 12;
+    const P_HEIGHT = 100;
+    const P_MARGIN = 12;
+    const P_SPEED = 6;
+    const BALL_R = 8;
+    const MAX_SCORE = 11;
+
+    const player = { x: P_MARGIN, y: (canvas.height - P_HEIGHT)/2, w: P_WIDTH, h: P_HEIGHT, dy: 0, score: 0 };
+    const opponent = { x: canvas.width - P_MARGIN - P_WIDTH, y: (canvas.height - P_HEIGHT)/2, w: P_WIDTH, h: P_HEIGHT, score: 0, speed: 4 };
+    const ball = { x: canvas.width/2, y: canvas.height/2, r: BALL_R, dx: 0, dy: 0, speed: 5 };
+
+    // sistema de partícules per l'explosió
+    const particles = [];
+
+    function spawnExplosion(x, y, color = '#fff') {
+      const count = 24;
+      for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 2 + Math.random() * 4;
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+        particles.push({
+          x: x,
+          y: y,
+          vx: vx,
+          vy: vy,
+          size: 2 + Math.random() * 4,
+          life: 0,
+          maxLife: 0.5 + Math.random() * 0.6,
+          color: color,
+          alpha: 1
+        });
+      }
+    }
+
+    function updateParticles(dt) {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        // gravetat suau i fregament
+        p.vy += 6 * dt;
+        p.vx *= 0.99;
+        p.vy *= 0.99;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life += dt;
+        p.alpha = Math.max(0, 1 - p.life / p.maxLife);
+        if (p.life >= p.maxLife) particles.splice(i, 1);
+      }
+    }
+
+    function drawParticles() {
+      for (const p of particles) {
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    let gameOver = false;
+    let winner = null;
+
+    function resetBall(direction = 1) {
+      ball.x = canvas.width/2;
+      ball.y = canvas.height/2;
+      const angle = (Math.random() * Math.PI/4) - (Math.PI/8); // -22.5 to 22.5 degrees
+      ball.speed = 5;
+      ball.dx = direction * ball.speed * Math.cos(angle);
+      ball.dy = ball.speed * Math.sin(angle);
+    }
+
+    // Quan es marca un punt, fem una explosió a la posició actual de la pilota
+    function startPoint(scoredByPlayer) {
+      // spawn explosió amb color segons qui marca
+      const color = scoredByPlayer ? '#9ad' : '#f59';
+      spawnExplosion(ball.x, ball.y, color);
+
+      if (scoredByPlayer) player.score++;
+      else opponent.score++;
+
+      if (player.score >= MAX_SCORE || opponent.score >= MAX_SCORE) {
+        gameOver = true;
+        winner = player.score > opponent.score ? 'Jugador' : 'Oponent';
+        return;
+      }
+      // Serve cap al que ha perdut
+      const dir = scoredByPlayer ? -1 : 1;
+      // petit retard visual abans de tornar a servir per veure l'explosió (usant setTimeout)
+      setTimeout(() => resetBall(dir), 220);
+      // mourem la pilota fora de la vista fins que es re-iniciï per evitar doble detonació visual
+      ball.x = canvas.width/2;
+      ball.y = canvas.height/2;
+      ball.dx = 0;
+      ball.dy = 0;
+    }
+
+    function drawRect(x,y,w,h,color='#fff'){ ctx.fillStyle = color; ctx.fillRect(x,y,w,h); }
+    function drawCircle(x,y,r,color='#fff'){ ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); }
+    function drawText(text,x,y,size=24,color='#fff'){ ctx.fillStyle = color; ctx.font = `${size}px monospace`; ctx.fillText(text,x,y); }
+
+    function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+    // control teclat
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      if (e.code === 'Space' && gameOver) {
+        // reinicia joc complet
+        player.score = 0; opponent.score = 0; gameOver = false; winner = null;
+        resetBall(Math.random() < 0.5 ? 1 : -1);
+      }
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    // iniciar
+    resetBall(Math.random() < 0.5 ? 1 : -1);
+
+    // temps per a partícules (calcul simple)
+    let lastTime = performance.now();
+
+    function update(dt) {
+      if (!gameOver) {
+        // player moviment
+        if (keys['ArrowUp']) player.y -= P_SPEED;
+        if (keys['ArrowDown']) player.y += P_SPEED;
+        player.y = clamp(player.y, 0, canvas.height - player.h);
+
+        // opponent AI simple (segueix la pilota amb límit de velocitat)
+        const centerOpp = opponent.y + opponent.h/2;
+        if (centerOpp < ball.y - 10) opponent.y += opponent.speed;
+        else if (centerOpp > ball.y + 10) opponent.y -= opponent.speed;
+        opponent.y = clamp(opponent.y, 0, canvas.height - opponent.h);
+
+        // pilota moviment
+        ball.x += ball.dx;
+        ball.y += ball.dy;
+
+        // col·lisió amb top/bottom
+        if (ball.y - ball.r <= 0) { ball.y = ball.r; ball.dy = -ball.dy; }
+        if (ball.y + ball.r >= canvas.height) { ball.y = canvas.height - ball.r; ball.dy = -ball.dy; }
+
+        // col·lisió amb raquetes
+        function checkPaddleCollision(p) {
+          if (ball.x - ball.r < p.x + p.w && ball.x + ball.r > p.x &&
+              ball.y + ball.r > p.y && ball.y - ball.r < p.y + p.h) {
+            // reflect
+            const hitPos = (ball.y - (p.y + p.h/2)) / (p.h/2); // -1..1
+            const angle = hitPos * (Math.PI/3); // variar angle segons on colpeja
+            const dir = (ball.x < canvas.width/2) ? 1 : -1; // si està a l'esquerra, enviem a la dreta
+            ball.speed = Math.min(9, ball.speed + 0.3); // accelerar lleugerament
+            ball.dx = dir * ball.speed * Math.cos(angle);
+            ball.dy = ball.speed * Math.sin(angle);
+            // ajustar posició per evitar enganxar-se
+            if (dir > 0) ball.x = p.x + p.w + ball.r + 0.1;
+            else ball.x = p.x - ball.r - 0.1;
+          }
+        }
+        checkPaddleCollision(player);
+        checkPaddleCollision(opponent);
+
+        // punt si passa una raqueta
+        if (ball.x - ball.r <= 0) {
+          // oponent marca
+          startPoint(false);
+        } else if (ball.x + ball.r >= canvas.width) {
+          // jugador marca
+          startPoint(true);
+        }
+      }
+
+      // actualitza partícules amb dt
+      updateParticles(dt);
+    }
+
+    function drawNet() {
+      const seg = 10;
+      ctx.fillStyle = '#444';
+      for (let y=0; y<canvas.height; y += seg*2) {
+        ctx.fillRect(canvas.width/2 - 1, y, 2, seg);
+      }
+    }
+
+    function render() {
+      // fons
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      // xarxa
+      drawNet();
+
+      // raquetes
+      drawRect(player.x, player.y, player.w, player.h, '#9ad');
+      drawRect(opponent.x, opponent.y, opponent.w, opponent.h, '#f59');
+
+      // pilota
+      drawCircle(ball.x, ball.y, ball.r, '#fff');
+
+      // partícules (explosió)
+      drawParticles();
+
+      // marcador
+      drawText(player.score.toString(), canvas.width/4 - 10, 40, 36, '#9ad');
+      drawText(opponent.score.toString(), 3*canvas.width/4 - 10, 40, 36, '#f59');
+
+      if (gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, canvas.height/2 - 60, canvas.width, 140);
+        drawText(`${winner} guanya!`, canvas.width/2 - 120, canvas.height/2 - 6, 36, '#fff');
+        drawText(`Prem ESPAI per reiniciar`, canvas.width/2 - 150, canvas.height/2 + 36, 18, '#ddd');
+      }
+    }
+
+    function loop(ts) {
+      const now = ts || performance.now();
+      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      lastTime = now;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    loop();
+
+    // reinici per clic a canvas també
+    canvas.addEventListener('click', () => {
+      if (gameOver) {
+        player.score = 0; opponent.score = 0; gameOver = false; winner = null;
+        resetBall(Math.random() < 0.5 ? 1 : -1);
+      }
+    });
+  </script>
+</body>
+</html>
