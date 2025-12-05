@@ -18,12 +18,14 @@
       text-align: center;
     }
     canvas {
-      background: linear-gradient(to bottom, #87ceeb, #90ee90);
-      border: 3px solid #333;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-      border-radius: 8px;
+      background: #0a0a0a;
+      border: 5px solid #4a3828;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7), inset 0 0 20px rgba(0, 0, 0, 0.9);
+      border-radius: 2px;
       display: block;
       margin-bottom: 16px;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
     .info {
       font-size: 18px;
@@ -39,7 +41,7 @@
 </head>
 <body>
   <div id="gameContainer">
-    <div class="info" id="status">Busca el tresor! Usa les fletxes per moure</div>
+    <div class="info" id="status">🏰 Busca el tresor en el Castillo! Usa flechas o WASD para moure</div>
     <canvas id="game" width="600" height="400"></canvas>
     <div class="hint" id="hint">Distancia al tresor: --</div>
   </div>
@@ -50,26 +52,57 @@
     const statusDiv = document.getElementById('status');
     const hintDiv = document.getElementById('hint');
 
-    // Cargar imagen del personaje
-    const playerImg = new Image();
-    playerImg.src = './9c2a1a4c9bd6c8237fa258dfa1af6f01.jpg';
+    // Cargar GIF del personaje (Link)
+    const playerGif = new Image();
+    playerGif.src = './link-pixel-art-unscreen.gif';
+
+    // Tamaño de cada tile
+    const TILE_SIZE = 20;
+    
+    // Mapa del castillo
+    const castleMap = [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,0,0,0,2,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,3,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,0,9,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,2,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,2,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    ];
 
     // Estado del juego
     const player = {
-      x: canvas.width / 2,
-      y: canvas.height / 2,
-      size: 16,
-      speed: 5,
+      x: 2 * TILE_SIZE + TILE_SIZE / 2,
+      y: 2 * TILE_SIZE + TILE_SIZE / 2,
+      // Tamaño visual del sprite en pantalla (ligeramente mayor)
+      displaySize: 16,
+      // Radio de colisión ajustado proporcionalmente
+      size: 7,
+      speed: 3,
       dx: 0,
       dy: 0,
       animationCounter: 0,
-      isMoving: false
+      isMoving: false,
+      direction: 'down'
     };
 
     let treasure = {
-      x: Math.random() * (canvas.width - 40) + 20,
-      y: Math.random() * (canvas.height - 40) + 20,
-      size: 14,
+      x: 17 * TILE_SIZE + TILE_SIZE / 2,
+      y: 9 * TILE_SIZE + TILE_SIZE / 2,
+      size: 6,
       rotation: 0
     };
 
@@ -82,6 +115,25 @@
       const dx = treasure.x - player.x;
       const dy = treasure.y - player.y;
       return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Verificar colisión con mapa
+    function isWall(x, y) {
+      const tileX = Math.floor(x / TILE_SIZE);
+      const tileY = Math.floor(y / TILE_SIZE);
+      if (tileX < 0 || tileX >= castleMap[0].length || tileY < 0 || tileY >= castleMap.length) {
+        return true;
+      }
+      return castleMap[tileY][tileX] === 1;
+    }
+
+    // Detectar colisión jugador con pared
+    function canMoveTo(x, y, radius) {
+      return !isWall(x - radius, y - radius) &&
+             !isWall(x + radius, y - radius) &&
+             !isWall(x - radius, y + radius) &&
+             !isWall(x + radius, y + radius) &&
+             !isWall(x, y);
     }
 
     // Generar explosión de partículas
@@ -108,12 +160,12 @@
     function updateParticles() {
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.vy += 0.15; // gravedad
+        p.vy += 0.15;
         p.vx *= 0.98;
         p.vy *= 0.98;
         p.x += p.vx;
         p.y += p.vy;
-        p.life += 1 / 60; // asume 60 FPS
+        p.life += 1 / 60;
         if (p.life >= p.maxLife) particles.splice(i, 1);
       }
     }
@@ -130,68 +182,104 @@
       ctx.globalAlpha = 1;
     }
 
-    // Dibujar personaje con imagen
+    // Dibujar mapa del castillo
+    function drawMap() {
+      for (let row = 0; row < castleMap.length; row++) {
+        for (let col = 0; col < castleMap[row].length; col++) {
+          const x = col * TILE_SIZE;
+          const y = row * TILE_SIZE;
+          const tile = castleMap[row][col];
+          
+          if (tile === 1) {
+            // Pared - piedra
+            ctx.fillStyle = '#6B5344';
+            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle = '#4A3828';
+            ctx.fillRect(x, y, TILE_SIZE, 2);
+            ctx.fillRect(x, y, 2, TILE_SIZE);
+            ctx.fillStyle = '#8B7355';
+            ctx.fillRect(x + TILE_SIZE - 2, y, 2, TILE_SIZE);
+            ctx.fillRect(x, y + TILE_SIZE - 2, TILE_SIZE, 2);
+            if ((col + row) % 2 === 0) {
+              ctx.fillStyle = '#5A4833';
+              ctx.fillRect(x + 2, y + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+            }
+          } else if (tile === 0) {
+            // Suelo
+            ctx.fillStyle = '#D2B48C';
+            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            if (col % 2 === 0) {
+              ctx.fillStyle = '#C19A6B';
+              ctx.fillRect(x, y + TILE_SIZE / 2, TILE_SIZE, 1);
+            }
+          } else if (tile === 2) {
+            // Antorcha
+            ctx.fillStyle = '#D2B48C';
+            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(x + 8, y + 2, 4, 14);
+            ctx.fillStyle = '#FF6B00';
+            ctx.fillRect(x + 6, y + 0, 8, 4);
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(x + 7, y + 1, 6, 2);
+          } else if (tile === 3) {
+            // Armadura
+            ctx.fillStyle = '#D2B48C';
+            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+            ctx.fillStyle = '#C0C0C0';
+            ctx.fillRect(x + 6, y + 2, 8, 6);
+            ctx.fillRect(x + 5, y + 8, 10, 8);
+            ctx.fillRect(x + 7, y + 16, 6, 4);
+            ctx.fillStyle = '#808080';
+            ctx.fillRect(x + 7, y + 3, 2, 2);
+            ctx.fillRect(x + 11, y + 3, 2, 2);
+          } else if (tile === 9) {
+            ctx.fillStyle = '#D2B48C';
+            ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+          }
+        }
+      }
+    }
+
+    // Dibujar personaje con GIF
     function drawPlayer() {
-      ctx.save();
-      ctx.translate(player.x, player.y);
-      
-      // Rotar según dirección (izquierda/derecha)
-      if (player.dx < 0) {
-        ctx.scale(-1, 1); // voltear horizontalmente
+      if (playerGif.complete && playerGif.width > 0) {
+        ctx.save();
+        ctx.translate(player.x, player.y);
+
+        // Voltear si se mueve a la izquierda
+        if (player.dx < 0) {
+          ctx.scale(-1, 1);
+        }
+
+        const ds = player.displaySize;
+        ctx.drawImage(playerGif, -ds / 2, -ds / 2, ds, ds);
+        ctx.restore();
       }
-      
-      // Animación de caminata (bobbing vertical)
-      let bobAmount = 0;
-      if (player.isMoving) {
-        bobAmount = Math.sin(player.animationCounter * 0.15) * 3;
-      }
-      
-      // Dibujar imagen con pies en el suelo
-      if (playerImg.complete && playerImg.width > 0) {
-        const imgWidth = 32;
-        const imgHeight = 32;
-        ctx.drawImage(playerImg, -imgWidth / 2, -imgHeight / 2 + bobAmount, imgWidth, imgHeight);
-      } else {
-        // Fallback: dibujar personaje simple (cabeza + cuerpo)
-        ctx.fillStyle = '#ff6b6b';
-        ctx.beginPath();
-        ctx.arc(0, -8, 8, 0, Math.PI * 2);
-        ctx.fill();
-        
-        ctx.fillStyle = '#ff8888';
-        ctx.fillRect(-6, 0 + bobAmount, 12, 14);
-        
-        // piernas con animación
-        const legOffset = Math.sin(player.animationCounter * 0.15) * 2;
-        ctx.fillStyle = '#4488ff';
-        ctx.fillRect(-4, 14 + bobAmount + legOffset, 4, 8);
-        ctx.fillRect(0, 14 + bobAmount - legOffset, 4, 8);
-      }
-      ctx.restore();
     }
 
     // Dibujar tesoro
     function drawTreasure() {
-      ctx.save();
-      ctx.translate(treasure.x, treasure.y);
-      ctx.rotate(treasure.rotation);
-
-      // caja
+      const tx = treasure.x - treasure.size;
+      const ty = treasure.y - treasure.size;
+      
       ctx.fillStyle = '#8B4513';
-      ctx.fillRect(-treasure.size, -treasure.size * 0.6, treasure.size * 2, treasure.size * 1.2);
-      // tapa
+      ctx.fillRect(tx, ty + 2, treasure.size * 2, treasure.size * 1.2);
+      
       ctx.fillStyle = '#A0522D';
-      ctx.beginPath();
-      ctx.arc(-treasure.size, -treasure.size * 0.6, treasure.size * 0.4, Math.PI, 0);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(treasure.size, -treasure.size * 0.6, treasure.size * 0.4, Math.PI, 0);
-      ctx.fill();
-      // monedas dentro (brillo)
+      ctx.fillRect(tx + 1, ty, treasure.size * 2 - 2, 2);
+      
       ctx.fillStyle = '#FFD700';
-      ctx.fillRect(-treasure.size + 2, -treasure.size * 0.4, treasure.size * 2 - 4, treasure.size * 0.6);
-
-      ctx.restore();
+      ctx.fillRect(tx + treasure.size - 1, ty - 1, 2, 2);
+      
+      ctx.fillStyle = '#FFED4E';
+      ctx.fillRect(tx + 2, ty + 3, treasure.size * 2 - 4, treasure.size);
+      
+      ctx.fillStyle = '#FFD700';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(tx + 3 + i * 4, ty + 4, 2, 2);
+        ctx.fillRect(tx + 3 + i * 4, ty + 8, 2, 2);
+      }
     }
 
     // Control del teclado
@@ -207,12 +295,11 @@
     function updatePlayer() {
       player.dx = 0;
       player.dy = 0;
-      if (keys['ArrowUp'] || keys['w']) player.dy = -player.speed;
-      if (keys['ArrowDown'] || keys['s']) player.dy = player.speed;
-      if (keys['ArrowLeft'] || keys['a']) player.dx = -player.speed;
-      if (keys['ArrowRight'] || keys['d']) player.dx = player.speed;
+      if (keys['ArrowUp'] || keys['w']) { player.dy = -player.speed; player.direction = 'up'; }
+      if (keys['ArrowDown'] || keys['s']) { player.dy = player.speed; player.direction = 'down'; }
+      if (keys['ArrowLeft'] || keys['a']) { player.dx = -player.speed; player.direction = 'left'; }
+      if (keys['ArrowRight'] || keys['d']) { player.dx = player.speed; player.direction = 'right'; }
 
-      // Determinar si se está moviendo
       player.isMoving = player.dx !== 0 || player.dy !== 0;
       
       if (player.isMoving) {
@@ -221,14 +308,21 @@
         player.animationCounter = 0;
       }
 
-      player.x += player.dx;
-      player.y += player.dy;
+      // Intentar mover en x
+      if (canMoveTo(player.x + player.dx, player.y, player.size)) {
+        player.x += player.dx;
+      }
+      
+      // Intentar mover en y
+      if (canMoveTo(player.x, player.y + player.dy, player.size)) {
+        player.y += player.dy;
+      }
 
-      // límites del canvas
-      player.x = Math.max(player.size, Math.min(canvas.width - player.size, player.x));
-      player.y = Math.max(player.size, Math.min(canvas.height - player.size, player.y));
+      // Limitar dentro del canvas usando la mitad del sprite para evitar que se recorte
+      const half = player.displaySize / 2;
+      player.x = Math.max(half, Math.min(canvas.width - half, player.x));
+      player.y = Math.max(half, Math.min(canvas.height - half, player.y));
 
-      // detectar colisión con tesoro
       const dist = getDistance();
       if (dist < player.size + treasure.size) {
         gameWon = true;
@@ -239,35 +333,14 @@
 
     // Render
     function render() {
-      // limpiar canvas
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // dibujar fondo (opcional, ya está en CSS)
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.fillStyle = '#0a0a0a';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // dibujar grid opcional
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i < canvas.width; i += 40) {
-        ctx.beginPath();
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i, canvas.height);
-        ctx.stroke();
-      }
-      for (let i = 0; i < canvas.height; i += 40) {
-        ctx.beginPath();
-        ctx.moveTo(0, i);
-        ctx.lineTo(canvas.width, i);
-        ctx.stroke();
-      }
-
-      // dibujar personaje y tesoro
+      drawMap();
       drawPlayer();
       drawTreasure();
       drawParticles();
 
-      // actualizar hint
       const dist = getDistance();
       hintDiv.textContent = `Distancia al tresor: ${Math.round(dist)} píxeles`;
     }
@@ -277,7 +350,7 @@
       if (!gameWon) {
         updatePlayer();
         updateParticles();
-        treasure.rotation += 0.02; // animar tesoro
+        treasure.rotation += 0.02;
       } else {
         updateParticles();
         treasure.rotation += 0.02;
@@ -288,7 +361,6 @@
       requestAnimationFrame(gameLoop);
     }
 
-    // iniciar
     gameLoop();
   </script>
 </body>

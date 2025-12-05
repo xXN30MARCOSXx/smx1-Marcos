@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <title>Frutes - Joc senzill</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body{height:100%;margin:0;display:flex;align-items:center;justify-content:center;background:#eef7fb;font-family:system-ui,Arial}
+    #gameContainer{width:700px;text-align:center;position:relative}
+    canvas{background:linear-gradient(#bfe9ff,#eaffff);display:block;border:4px solid #6b4426;border-radius:6px}
+    .hud{display:flex;justify-content:space-between;padding:8px 0;font-weight:700;color:#0b3b4a}
+    .game-over{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.85);color:#fff;padding:20px;border-radius:8px;display:none}
+    .hint{font-size:13px;color:#21474f;margin-top:8px}
+    button{margin-top:10px;padding:8px 12px;border-radius:6px;border:none;background:#2b8a78;color:#fff}
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <div class="hud"><div>Puntuació: <span id="score">0</span></div><div>Fruites perdudes: <span id="lost">0</span>/10</div></div>
+    <canvas id="game" width="700" height="480"></canvas>
+    <div class="hint">Mou la cistella amb les fletxes ← → o A/D. Atrapa pomes i plàtans. Les fruites apareixen cada 1,25 s.</div>
+    <div class="game-over" id="gameOver"><div style="font-size:20px">Joc acabat</div><div style="margin-top:8px">Puntuació final: <span id="finalScore">0</span></div><button id="restart">Tornar a jugar</button></div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const lostEl = document.getElementById('lost');
+    const gameOverEl = document.getElementById('gameOver');
+    const finalScoreEl = document.getElementById('finalScore');
+    const restartBtn = document.getElementById('restart');
+
+    // Parámetros
+    const BASKET_W = 100;
+    const BASKET_H = 22;
+    const BASKET_Y = canvas.height - 56;
+    let BASKET_SPEED = 10; // cesta más ágil
+    const FRUIT_BASE_SPEED = 0.6; // lento
+
+    // Emoticons: variedad de fruites
+    const fruitEmojis = [
+      {name:'Poma', emoji:'🍎', points:10, key:'apple'},
+      {name:'Plàtan', emoji:'🍌', points:12, key:'banana'},
+      {name:'Taronja', emoji:'🍊', points:11, key:'orange'},
+      {name:'Síndria', emoji:'🍉', points:20, key:'watermelon'},
+      {name:'Raïm', emoji:'🍇', points:18, key:'grape'},
+      {name:'Fresa', emoji:'🍓', points:15, key:'strawberry'},
+      {name:'Préssec', emoji:'🍑', points:14, key:'peach'},
+      {name:'Pinya', emoji:'🍍', points:22, key:'pineapple'},
+      {name:'Pera', emoji:'🍐', points:12, key:'pear'}
+    ];
+
+    const state = {score:0,lost:0,gameOver:false};
+
+    const basket = {x:canvas.width/2 - BASKET_W/2,y:BASKET_Y,width:BASKET_W,height:BASKET_H,dx:0};
+
+    let fruits = [];
+    const SPAWN_INTERVAL = 1250; // ms = 1.25s
+    let lastSpawn = performance.now();
+
+    // Controles
+    const keys = {};
+    window.addEventListener('keydown', e=>{ keys[e.key] = true; });
+    window.addEventListener('keyup', e=>{ keys[e.key] = false; });
+
+    function spawnFruit(){
+      const t = fruitEmojis[Math.floor(Math.random()*fruitEmojis.length)];
+      const size = Math.floor(30 + Math.random()*40); // 30..70 px
+      const x = Math.random()*(canvas.width - size);
+      const vy = FRUIT_BASE_SPEED + Math.random()*0.8; // lenta
+      fruits.push({x, y: -size, vy, size, type: t});
+    }
+
+    function update(dt){
+      if(state.gameOver) return;
+      // mover cesta
+      basket.dx = 0;
+      if(keys['ArrowLeft'] || keys['a']) basket.dx = -BASKET_SPEED;
+      if(keys['ArrowRight'] || keys['d']) basket.dx = BASKET_SPEED;
+      basket.x += basket.dx;
+      basket.x = Math.max(0, Math.min(canvas.width - basket.width, basket.x));
+
+      // spawn cada 1.25s
+      const now = performance.now();
+      if(now - lastSpawn >= SPAWN_INTERVAL){ spawnFruit(); lastSpawn = now; }
+
+      // actualizar frutas
+      for(let i=fruits.length-1;i>=0;i--){
+        const f = fruits[i];
+        f.y += f.vy * (dt/16); // normalizar por dt (aprox 60fps)
+        // colisión (AABB)
+        if(f.y + f.size >= basket.y && f.y <= basket.y + basket.height && f.x + f.size >= basket.x && f.x <= basket.x + basket.width){
+          state.score += f.type.points;
+          fruits.splice(i,1);
+          continue;
+        }
+        if(f.y > canvas.height){
+          state.lost++;
+          fruits.splice(i,1);
+          if(state.lost >= 10){
+            state.gameOver = true;
+            finalScoreEl.textContent = state.score;
+            gameOverEl.style.display = 'block';
+          }
+        }
+      }
+    }
+
+    function drawBasket(){
+      // cuerpo
+      ctx.fillStyle = '#8b5a2b';
+      ctx.fillRect(basket.x, basket.y, basket.width, basket.height);
+      // borde
+      ctx.strokeStyle = '#5c3d28'; ctx.lineWidth = 2; ctx.strokeRect(basket.x, basket.y, basket.width, basket.height);
+    }
+
+    function drawFruit(f){
+      const s = f.size;
+      // usar emoji - ajustar fuente al tamaño
+      ctx.font = `${Math.floor(s)}px serif`;
+      ctx.textBaseline = 'top';
+      // dibujar emoji en x,y
+      ctx.fillText(f.type.emoji, f.x, f.y);
+      // opcional: pequeño borde para legibilidad
+      // ctx.strokeStyle='rgba(0,0,0,0.08)'; ctx.lineWidth=1; ctx.strokeText(f.type.emoji, f.x, f.y);
+    }
+
+    function render(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // suelo
+      ctx.fillStyle = '#dff0ea'; ctx.fillRect(0, canvas.height-30, canvas.width, 30);
+      // frutas
+      for(const f of fruits) drawFruit(f);
+      // cesta
+      drawBasket();
+      // hud
+      scoreEl.textContent = state.score; lostEl.textContent = state.lost;
+    }
+
+    // reiniciar
+    function reset(){
+      fruits = []; state.score = 0; state.lost = 0; state.gameOver = false; gameOverEl.style.display='none'; lastSpawn = performance.now();
+    }
+    restartBtn.addEventListener('click', ()=>{ reset(); });
+
+    let lastTime = performance.now();
+    function loop(){
+      const now = performance.now();
+      const dt = now - lastTime;
+      update(dt);
+      render();
+      lastTime = now;
+      requestAnimationFrame(loop);
+    }
+    // start
+    loop();
+  </script>
+</body>
+</html>
