@@ -2,291 +2,344 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Bosque con minimapa y colisiones</title>
+  <title>Joc del Tresor</title>
   <style>
-    body { margin: 0; background: #121212; color: #ddd; font-family: system-ui, sans-serif; display:flex; }
-    #hud { position: fixed; left: 10px; top: 10px; background: rgba(0,0,0,0.45); padding: 6px 10px; border-radius: 6px; font-size: 14px; backdrop-filter: blur(3px); }
-    #game { background: #0c1510; image-rendering: crisp-edges; image-rendering: pixelated; }
-    #rightPanel { display:flex; flex-direction:column; gap:8px; padding:8px; width: 220px; }
-    #minimap { background:#1a1a1a; border:2px solid #4a4a4a; }
+    body { margin: 0; overflow: hidden; background: #222; color: #eee; font-family: system-ui, sans-serif; }
+    #miniMap { position: absolute; top: 10px; right: 10px; border: 2px solid #fff; background: #111; }
+    #status { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6); padding: 8px 10px; border-radius: 6px; font-size: 14px; }
   </style>
 </head>
 <body>
-  <div id="hud">Controles: WASD / Flechas. Árboles = muros. Toca el tesoro para moverlo.</div>
-  <canvas id="game" width="640" height="480"></canvas>
-  <div id="rightPanel">
-    <canvas id="minimap" width="200" height="200"></canvas>
-  </div>
+  <div id="status">Usa las flechas para moverte</div>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <canvas id="miniMap" width="240" height="180"></canvas>
 
   <script>
-    // Parámetros
-    const TILE = 32;
-    const MAP_W = 40;
-    const MAP_H = 40;
-    const VIEW_W = 640;
-    const VIEW_H = 480;
+    // Configuración general
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const miniMap = document.getElementById("miniMap");
+    const miniCtx = miniMap.getContext("2d");
 
-    // Canvas
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
-    const mini = document.getElementById('minimap');
-    const mctx = mini.getContext('2d');
-
-    // Tipos y colores
-    const TILE_TYPES = { GRASS: 0, TREE: 1 };
-    const COLORS = {
-      grassA: '#2a9d8f',
-      grassB: '#238b81',
-      grassC: '#1f7a72',
-      treeTrunk: '#4a3428',
-      treeLeaves: '#2f6d3e',
-      treeShadow: '#1e4d2a',
-      player: '#ffd166',
-      treasure: '#e76f51'
-    };
+    const TILE = { GRASS: 0, TREE: 1, PATH: 2, RIVER: 3, ROCK: 4 };
+    const tileSize = 32;
+    const cols = 40;
+    const rows = 30;
+    const mapWidth = cols * tileSize;
+    const mapHeight = rows * tileSize;
 
     // Mapa
-    const map = new Array(MAP_W * MAP_H).fill(TILE_TYPES.GRASS);
+    const map = Array.from({ length: rows }, () => Array(cols).fill(TILE.GRASS));
 
-    function randSeeded(x, y) {
-      const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
-      return s - Math.floor(s);
-    }
-
-    function generateForest(density = 0.32) {
-      for (let y = 0; y < MAP_H; y++) {
-        for (let x = 0; x < MAP_W; x++) {
-          const i = y * MAP_W + x;
-          const n1 = randSeeded(x, y);
-          const n2 = randSeeded(x * 0.61, y * 0.61);
-          const noise = (n1 * 0.7 + n2 * 0.3);
-          map[i] = noise < density ? TILE_TYPES.TREE : TILE_TYPES.GRASS;
-        }
-      }
-      // senderos para jugabilidad
-      for (let y = 8; y < MAP_H - 8; y += 16) {
-        for (let x = 1; x < MAP_W - 1; x++) map[y * MAP_W + x] = TILE_TYPES.GRASS;
-      }
-      for (let x = 8; x < MAP_W - 8; x += 16) {
-        for (let y = 1; y < MAP_H - 1; y++) map[y * MAP_W + x] = TILE_TYPES.GRASS;
-      }
-    }
-    generateForest();
-
-    // Entidades
-    const player = { x: 5, y: 5, speed: 6 };
-    const treasure = { x: 0, y: 0 };
-
-    function placeInEmpty(obj) {
-      let attempts = 0;
-      while (attempts++ < 5000) {
-        const x = Math.floor(Math.random() * MAP_W);
-        const y = Math.floor(Math.random() * MAP_H);
-        if (map[y * MAP_W + x] === TILE_TYPES.GRASS) {
-          obj.x = x; obj.y = y; return;
-        }
-      }
-      // Fallback secuencial
-      for (let y = 0; y < MAP_H; y++) {
-        for (let x = 0; x < MAP_W; x++) {
-          if (map[y * MAP_W + x] === TILE_TYPES.GRASS) { obj.x = x; obj.y = y; return; }
+    // Generación de curvas (río y caminos)
+    function generateCurve(yStart, thickness, wobble, type) {
+      let cx = Math.floor(cols * 0.2 + Math.random() * cols * 0.6);
+      for (let y = yStart; y < rows - 1; y++) {
+        cx += Math.sin(y * 0.35 + wobble) * 0.6 + (Math.random() - 0.5) * 0.6;
+        cx = Math.max(1, Math.min(cols - 2, cx));
+        for (let t = -thickness; t <= thickness; t++) {
+          const x = Math.floor(cx + t);
+          if (x >= 0 && x < cols) map[y][x] = type;
         }
       }
     }
-    placeInEmpty(treasure);
 
-    // Entrada
-    const keys = new Set();
-    window.addEventListener('keydown', e => {
-      const k = e.key.toLowerCase();
-      if (['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)) {
-        keys.add(k); e.preventDefault();
-      }
-    });
-    window.addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+    // Río principal
+    generateCurve(2, 2, Math.random() * 10, TILE.RIVER);
+    // Caminos curvos (2 curvas más finas)
+    generateCurve(0, 1, Math.random() * 10 + 5, TILE.PATH);
+    generateCurve(0, 1, Math.random() * 10 + 15, TILE.PATH);
 
-    // Colisiones
-    function canWalk(nx, ny) {
-      if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) return false;
-      return map[ny * MAP_W + nx] !== TILE_TYPES.TREE;
-    }
-
-    function movePlayer() {
-  let nx = Math.floor(player.x);
-  let ny = Math.floor(player.y);
-
-  if (keys.has('w') || keys.has('arrowup')) ny -= 1;
-  if (keys.has('s') || keys.has('arrowdown')) ny += 1;
-  if (keys.has('a') || keys.has('arrowleft')) nx -= 1;
-  if (keys.has('d') || keys.has('arrowright')) nx += 1;
-
-  if (canWalk(nx, ny)) {
-    player.x = nx;
-    player.y = ny;
-  }
-}
-
-
-    function checkTreasure() {
-      if (Math.floor(player.x) === treasure.x && Math.floor(player.y) === treasure.y) {
-        placeInEmpty(treasure);
+    // Distribución de árboles y rocas con clusters
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        if (map[y][x] === TILE.GRASS) {
+          const r = Math.random();
+          if (r < 0.12) map[y][x] = TILE.TREE;          // bosque denso
+          else if (r < 0.16) map[y][x] = TILE.ROCK;     // rocas sueltas
+        }
       }
     }
-
-    // Cámara
-    const camera = { x: 0, y: 0, w: Math.floor(VIEW_W / TILE), h: Math.floor(VIEW_H / TILE) };
-    function updateCamera() {
-      camera.x = Math.floor(player.x - camera.w / 2);
-      camera.y = Math.floor(player.y - camera.h / 2);
-      camera.x = Math.max(0, Math.min(camera.x, MAP_W - camera.w));
-      camera.y = Math.max(0, Math.min(camera.y, MAP_H - camera.h));
-    }
-
-    // Render visual mejorado
-    function drawGrassTile(sx, sy, x, y) {
-      const t = (x * 13 + y * 7) % 3;
-      ctx.fillStyle = t === 0 ? COLORS.grassA : (t === 1 ? COLORS.grassB : COLORS.grassC);
-      ctx.fillRect(sx, sy, TILE, TILE);
-      // textura suave
-      ctx.fillStyle = 'rgba(255,255,255,0.03)';
-      ctx.fillRect(sx, sy, TILE, 1);
-      ctx.fillRect(sx, sy + TILE - 2, TILE, 1);
-    }
-
-    function drawTreeTile(sx, sy) {
-      // base
-      ctx.fillStyle = COLORS.grassB;
-      ctx.fillRect(sx, sy, TILE, TILE);
-      // sombra
-      ctx.fillStyle = COLORS.treeShadow;
-      ctx.beginPath(); ctx.arc(sx + 8, sy + 10, 7, 0, Math.PI * 2); ctx.fill();
-      // copa con degradado
-      const g = ctx.createRadialGradient(sx + 8, sy + 7, 2, sx + 8, sy + 8, 7);
-      g.addColorStop(0, '#3b8f54');
-      g.addColorStop(1, COLORS.treeLeaves);
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(sx + 8, sy + 8, 6, 0, Math.PI * 2); ctx.fill();
-      // tronco
-      ctx.fillStyle = COLORS.treeTrunk;
-      ctx.fillRect(sx + 6, sy + 10, 4, 6);
-    }
-
-    function drawTile(x, y, type) {
-      const sx = (x - camera.x) * TILE;
-      const sy = (y - camera.y) * TILE;
-      if (type === TILE_TYPES.GRASS) {
-        drawGrassTile(sx, sy, x, y);
-      } else {
-        drawTreeTile(sx, sy);
-      }
-    }
-
-    let shine = 0; // brillo animado del tesoro
-    function drawTreasure() {
-      const sx = (treasure.x - camera.x) * TILE;
-      const sy = (treasure.y - camera.y) * TILE;
-      // caja
-      ctx.fillStyle = COLORS.treasure;
-      ctx.fillRect(sx + 3, sy + 3, TILE - 6, TILE - 6);
-      // borde
-      ctx.strokeStyle = '#ffb4a2';
-      ctx.strokeRect(sx + 3, sy + 3, TILE - 6, TILE - 6);
-      // brillo animado
-      const alpha = 0.3 + 0.2 * Math.sin(shine);
-      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-      ctx.fillRect(sx + 4, sy + 4, TILE - 8, 2);
-    }
-
-    function drawPlayer() {
-      const sx = (player.x - camera.x) * TILE;
-      const sy = (player.y - camera.y) * TILE;
-      ctx.fillStyle = COLORS.player;
-      ctx.beginPath();
-      ctx.arc(sx + TILE/2, sy + TILE/2, 6, 0, Math.PI * 2);
-      ctx.fill();
-      // sombra ligera
-      ctx.fillStyle = 'rgba(0,0,0,0.15)';
-      ctx.beginPath();
-      ctx.arc(sx + TILE/2, sy + TILE/2 + 3, 5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    function drawScene() {
-      ctx.clearRect(0, 0, VIEW_W, VIEW_H);
-      const endX = Math.min(MAP_W, camera.x + camera.w + 1);
-      const endY = Math.min(MAP_H, camera.y + camera.h + 1);
-      for (let y = camera.y; y < endY; y++) {
-        for (let x = camera.x; x < endX; x++) {
-          if (x >= 0 && y >= 0 && x < MAP_W && y < MAP_H) {
-            drawTile(x, y, map[y * MAP_W + x]);
+    // Añadir claros en los caminos
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      if (map[y][x] === TILE.PATH) { // limpia alrededor
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+          const ny = y + oy, nx = x + ox;
+          if (ny >= 0 && ny < rows && nx >= 0 && nx < cols && map[ny][nx] === TILE.TREE) {
+            map[ny][nx] = TILE.GRASS;
           }
         }
       }
-      drawTreasure();
-      drawPlayer();
-
-      // viñeteado sutil
-      const grd = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-      grd.addColorStop(0, 'rgba(0,0,0,0.05)');
-      grd.addColorStop(1, 'rgba(0,0,0,0.22)');
-      ctx.fillStyle = grd;
-      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     }
 
-    // Minimap
-    function drawMinimap() {
-      const scaleX = mini.width / MAP_W;
-      const scaleY = mini.height / MAP_H;
-      mctx.clearRect(0, 0, mini.width, mini.height);
+    // Jugador y tesoro
+    const player = { x: tileSize * 3, y: tileSize * 3, w: 26, h: 26, speed: 2.3 };
+    const treasure = { x: 0, y: 0, w: 18, h: 18 };
 
-      // fondo
-      mctx.fillStyle = '#111';
-      mctx.fillRect(0, 0, mini.width, mini.height);
+    // Colisiones
+    function tileAt(px, py) {
+      const c = Math.floor(px / tileSize), r = Math.floor(py / tileSize);
+      if (c < 0 || c >= cols || r < 0 || r >= rows) return TILE.ROCK; // borde bloquea
+      return map[r][c];
+    }
+    function isBlocked(px, py) {
+      const t = tileAt(px, py);
+      return t === TILE.TREE || t === TILE.RIVER || t === TILE.ROCK;
+    }
 
-      // terreno
-      for (let y = 0; y < MAP_H; y++) {
-        for (let x = 0; x < MAP_W; x++) {
-          mctx.fillStyle = map[y * MAP_W + x] === TILE_TYPES.TREE ? COLORS.treeLeaves : COLORS.grassA;
-          mctx.fillRect(x * scaleX, y * scaleY, scaleX, scaleY);
+    // Movimiento con separación de ejes (para colisión suave)
+    function move(dx, dy, dt) {
+      const stepX = dx * player.speed * dt;
+      const stepY = dy * player.speed * dt;
+      // X
+      const newX = player.x + stepX;
+      const cx = newX + player.w / 2, cy = player.y + player.h / 2;
+      if (!isBlocked(cx, cy) && !isBlocked(newX, player.y) && !isBlocked(newX + player.w, player.y + player.h)) {
+        player.x = Math.max(0, Math.min(newX, mapWidth - player.w));
+      }
+      // Y
+      const newY = player.y + stepY;
+      const cx2 = player.x + player.w / 2, cy2 = newY + player.h / 2;
+      if (!isBlocked(cx2, cy2) && !isBlocked(player.x, newY) && !isBlocked(player.x + player.w, newY + player.h)) {
+        player.y = Math.max(0, Math.min(newY, mapHeight - player.h));
+      }
+    }
+
+    // Colocar tesoro en lugar caminable aleatorio
+    function placeTreasure() {
+      for (let i = 0; i < 500; i++) {
+        const cx = Math.floor(Math.random() * cols), cy = Math.floor(Math.random() * rows);
+        if (map[cy][cx] === TILE.GRASS || map[cy][cx] === TILE.PATH) {
+          treasure.x = cx * tileSize + (tileSize - treasure.w) / 2;
+          treasure.y = cy * tileSize + (tileSize - treasure.h) / 2;
+          return;
         }
       }
+      treasure.x = tileSize * 10; treasure.y = tileSize * 10;
+    }
+    placeTreasure();
 
-      // cámara (rectángulo de vista)
-      mctx.strokeStyle = '#ffffff88';
-      mctx.lineWidth = 1;
-      mctx.strokeRect(camera.x * scaleX, camera.y * scaleY, camera.w * scaleX, camera.h * scaleY);
-
-      // tesoro
-      mctx.fillStyle = COLORS.treasure;
-      mctx.fillRect(treasure.x * scaleX, treasure.y * scaleY, scaleX, scaleY);
-
-      // jugador
-      mctx.fillStyle = COLORS.player;
-      mctx.beginPath();
-      mctx.arc(
-        player.x * scaleX + scaleX / 2,
-        player.y * scaleY + scaleY / 2,
-        Math.max(2, Math.min(scaleX, scaleY) / 3),
-        0, Math.PI * 2
-      );
-      mctx.fill();
+    // Dibujo de tiles con detalle
+    function drawGrass(x, y, oX, oY) {
+      // prado con variación
+      const baseX = x * tileSize - oX, baseY = y * tileSize - oY;
+      ctx.fillStyle = "#7fbf73";
+      ctx.fillRect(baseX, baseY, tileSize, tileSize);
+      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.beginPath();
+      ctx.moveTo(baseX + 4, baseY + 28);
+      ctx.quadraticCurveTo(baseX + 12, baseY + 26, baseX + 20, baseY + 28);
+      ctx.stroke();
+    }
+    function drawPath(x, y, oX, oY) {
+      const bx = x * tileSize - oX, by = y * tileSize - oY;
+      ctx.fillStyle = "#a37a53";
+      ctx.fillRect(bx, by, tileSize, tileSize);
+      // textura
+      ctx.strokeStyle = "rgba(0,0,0,0.08)";
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(bx + 4 + i * 9, by + 6);
+        ctx.lineTo(bx + 6 + i * 9, by + 26);
+        ctx.stroke();
+      }
+    }
+    function drawRiver(x, y, oX, oY) {
+      const bx = x * tileSize - oX, by = y * tileSize - oY;
+      // agua
+      const grad = ctx.createLinearGradient(bx, by, bx, by + tileSize);
+      grad.addColorStop(0, "#3aa0ff");
+      grad.addColorStop(1, "#1f78d1");
+      ctx.fillStyle = grad;
+      ctx.fillRect(bx, by, tileSize, tileSize);
+      // orillas
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.beginPath();
+      ctx.moveTo(bx + 2, by + 8); ctx.lineTo(bx + 30, by + 10);
+      ctx.moveTo(bx + 3, by + 22); ctx.lineTo(bx + 29, by + 20);
+      ctx.stroke();
+    }
+    function drawRock(x, y, oX, oY) {
+      const bx = x * tileSize - oX, by = y * tileSize - oY;
+      ctx.fillStyle = "#7d7d7d";
+      ctx.beginPath();
+      ctx.moveTo(bx + 8, by + 24);
+      ctx.lineTo(bx + 14, by + 10);
+      ctx.lineTo(bx + 24, by + 16);
+      ctx.lineTo(bx + 22, by + 26);
+      ctx.closePath();
+      ctx.fill();
+      // sombra
+      ctx.fillStyle = "rgba(0,0,0,0.2)";
+      ctx.fillRect(bx + 12, by + 18, 10, 6);
+    }
+    function drawTree(x, y, oX, oY) {
+      const bx = x * tileSize - oX, by = y * tileSize - oY;
+      // tronco
+      ctx.fillStyle = "#6b4b2e";
+      ctx.fillRect(bx + 12, by + 16, 8, 12);
+      // copa
+      ctx.fillStyle = "#2d7b2e";
+      ctx.beginPath(); ctx.arc(bx + 10, by + 14, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 20, by + 14, 10, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx + 15, by + 8, 12, 0, Math.PI * 2); ctx.fill();
+      // brillo
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath(); ctx.arc(bx + 15, by + 8, 12, 0.2, 1.0); ctx.stroke();
     }
 
-    // Bucle
-    let last = performance.now();
-    function loop(now) {
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
-      shine += dt * 6;
+    function drawTile(x, y, oX, oY) {
+      const t = map[y][x];
+      if (t === TILE.GRASS) drawGrass(x, y, oX, oY);
+      else if (t === TILE.PATH) drawPath(x, y, oX, oY);
+      else if (t === TILE.RIVER) drawRiver(x, y, oX, oY);
+      else if (t === TILE.ROCK) drawRock(x, y, oX, oY);
+      else if (t === TILE.TREE) {
+        // fondo hierba bajo árbol
+        drawGrass(x, y, oX, oY);
+        drawTree(x, y, oX, oY);
+      }
+    }
 
-      movePlayer();
-      checkTreasure();
-      updateCamera();
-      drawScene();
-      drawMinimap();
+    // Dibujo del personaje con detalle (estilo aventurero)
+    function drawPlayer(oX, oY) {
+      const px = player.x - oX, py = player.y - oY;
+      // botas
+      ctx.fillStyle = "#5a3a1f";
+      ctx.fillRect(px + 6, py + player.h - 6, 8, 6);
+      ctx.fillRect(px + player.w - 14, py + player.h - 6, 8, 6);
+      // cuerpo
+      ctx.fillStyle = "#2e8b57";
+      ctx.fillRect(px + 6, py + 8, player.w - 12, player.h - 12);
+      // cinturón
+      ctx.fillStyle = "#3a2a18";
+      ctx.fillRect(px + 6, py + player.h - 16, player.w - 12, 4);
+      // cabeza
+      ctx.fillStyle = "#f1c27d";
+      ctx.beginPath();
+      ctx.arc(px + player.w / 2, py + 8, 8, 0, Math.PI * 2);
+      ctx.fill();
+      // ojos
+      ctx.fillStyle = "#222";
+      ctx.beginPath(); ctx.arc(px + player.w / 2 - 3, py + 6, 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(px + player.w / 2 + 3, py + 6, 1.8, 0, Math.PI * 2); ctx.fill();
+      // gorro
+      ctx.fillStyle = "#1f6f2f";
+      ctx.beginPath();
+      ctx.moveTo(px + player.w / 2 - 10, py + 2);
+      ctx.quadraticCurveTo(px + player.w / 2 + 4, py - 6, px + player.w / 2 + 12, py + 4);
+      ctx.lineTo(px + player.w / 2 - 8, py + 6);
+      ctx.closePath(); ctx.fill();
+      // escudo
+      ctx.fillStyle = "#7f6a3a";
+      ctx.beginPath(); ctx.arc(px + player.w - 4, py + 16, 7, -Math.PI / 2, Math.PI / 2); ctx.fill();
+      ctx.strokeStyle = "#c9b37a"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(px + player.w - 4, py + 16, 7, -Math.PI / 2, Math.PI / 2); ctx.stroke();
+      // espada (brillo)
+      ctx.strokeStyle = "#99d5ff"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(px + 4, py + 14); ctx.lineTo(px - 6, py + 4); ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(px + 4, py + 14); ctx.lineTo(px - 2, py + 8); ctx.stroke();
+    }
 
+    // Dibujo del tesoro (cofre)
+    function drawTreasure(oX, oY) {
+      const bx = treasure.x - oX, by = treasure.y - oY;
+      // base
+      ctx.fillStyle = "#b88a2a";
+      ctx.fillRect(bx, by + 6, treasure.w, treasure.h - 6);
+      // tapa
+      ctx.fillStyle = "#9b6f1e";
+      ctx.fillRect(bx, by, treasure.w, 8);
+      // cerrojo
+      ctx.fillStyle = "#333";
+      ctx.fillRect(bx + treasure.w / 2 - 2, by + treasure.h / 2, 4, 6);
+      ctx.fillStyle = "#e4c84a";
+      ctx.fillRect(bx + treasure.w / 2 - 2, by + treasure.h / 2 - 2, 4, 2);
+    }
+
+    // Render del mapa
+    function drawMap(oX, oY) {
+      // Solo dibujar tiles visibles para rendimiento
+      const startCol = Math.max(0, Math.floor(oX / tileSize));
+      const startRow = Math.max(0, Math.floor(oY / tileSize));
+      const endCol = Math.min(cols - 1, Math.floor((oX + canvas.width) / tileSize) + 1);
+      const endRow = Math.min(rows - 1, Math.floor((oY + canvas.height) / tileSize) + 1);
+      for (let y = startRow; y <= endRow; y++) {
+        for (let x = startCol; x <= endCol; x++) {
+          drawTile(x, y, oX, oY);
+        }
+      }
+    }
+
+    // Mini mapa
+    function drawMiniMap() {
+      miniCtx.clearRect(0, 0, miniMap.width, miniMap.height);
+      const sX = miniMap.width / mapWidth, sY = miniMap.height / mapHeight;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const t = map[y][x];
+          let col;
+          if (t === TILE.GRASS) col = "#7fbf73";
+          else if (t === TILE.PATH) col = "#a37a53";
+          else if (t === TILE.RIVER) col = "#2f8ae0";
+          else if (t === TILE.ROCK) col = "#808080";
+          else col = "#2d7b2e"; // árboles
+          miniCtx.fillStyle = col;
+          miniCtx.fillRect(x * tileSize * sX, y * tileSize * sY, tileSize * sX, tileSize * sY);
+        }
+      }
+      // tesoro
+      miniCtx.fillStyle = "gold";
+      miniCtx.fillRect(treasure.x * sX, treasure.y * sY, Math.max(3, treasure.w * sX), Math.max(3, treasure.h * sY));
+      // jugador
+      miniCtx.fillStyle = "deepskyblue";
+      miniCtx.fillRect(player.x * sX, player.y * sY, 6, 6);
+    }
+
+    // Bucle del juego
+    let keys = new Set();
+    let last = 0;
+    function loop(ts) {
+      const dt = Math.min(2, (ts - last) / 16.67); // normaliza a ~60fps, cap dt
+      last = ts;
+      update(dt);
+      draw();
       requestAnimationFrame(loop);
     }
+
+    function update(dt) {
+      let dx = 0, dy = 0;
+      if (keys.has("ArrowUp")) dy -= 1;
+      if (keys.has("ArrowDown")) dy += 1;
+      if (keys.has("ArrowLeft")) dx -= 1;
+      if (keys.has("ArrowRight")) dx += 1;
+      move(dx, dy, dt);
+
+      // Tesoro recogido
+      const overlapX = Math.abs((player.x + player.w / 2) - (treasure.x + treasure.w / 2)) < (player.w / 2);
+      const overlapY = Math.abs((player.y + player.h / 2) - (treasure.y + treasure.h / 2)) < (player.h / 2);
+      if (overlapX && overlapY) placeTreasure();
+    }
+
+    function draw() {
+      const oX = player.x + player.w / 2 - canvas.width / 2;
+      const oY = player.y + player.h / 2 - canvas.height / 2;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawMap(oX, oY);
+      drawTreasure(oX, oY);
+      drawPlayer(oX, oY);
+      drawMiniMap();
+    }
+
+    // Controles
+    document.addEventListener("keydown", (e) => {
+      const arrows = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+      if (arrows.includes(e.key)) { e.preventDefault(); keys.add(e.key); }
+    });
+    document.addEventListener("keyup", (e) => keys.delete(e.key));
+
+    // Iniciar
     requestAnimationFrame(loop);
   </script>
 </body>
