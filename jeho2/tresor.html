@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="ca">
+<head>
+  <meta charset="utf-8" />
+  <title>Busca el Tresor</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: system-ui, sans-serif;
+      color: #fff;
+    }
+    #gameContainer {
+      text-align: center;
+    }
+    canvas {
+      background: linear-gradient(to bottom, #87ceeb, #90ee90);
+      border: 3px solid #333;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      display: block;
+      margin-bottom: 16px;
+    }
+    .info {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 12px;
+    }
+    .hint {
+      font-size: 14px;
+      color: #ddd;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <div class="info" id="status">Busca el tresor! Usa les fletxes per moure</div>
+    <canvas id="game" width="600" height="400"></canvas>
+    <div class="hint" id="hint">Distancia al tresor: --</div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const statusDiv = document.getElementById('status');
+    const hintDiv = document.getElementById('hint');
+
+    // Cargar imagen del personaje
+    const playerImg = new Image();
+    playerImg.src = './9c2a1a4c9bd6c8237fa258dfa1af6f01.jpg';
+
+    // Estado del juego
+    const player = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      size: 16,
+      speed: 5,
+      dx: 0,
+      dy: 0,
+      animationCounter: 0,
+      isMoving: false
+    };
+
+    let treasure = {
+      x: Math.random() * (canvas.width - 40) + 20,
+      y: Math.random() * (canvas.height - 40) + 20,
+      size: 14,
+      rotation: 0
+    };
+
+    let gameWon = false;
+    let frameCount = 0;
+    const particles = [];
+
+    // Calcular distancia
+    function getDistance() {
+      const dx = treasure.x - player.x;
+      const dy = treasure.y - player.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Generar explosión de partículas
+    function spawnExplosion(x, y) {
+      for (let i = 0; i < 40; i++) {
+        const angle = (i / 40) * Math.PI * 2;
+        const speed = 2 + Math.random() * 4;
+        const vx = Math.cos(angle) * speed;
+        const vy = Math.sin(angle) * speed;
+        particles.push({
+          x: x,
+          y: y,
+          vx: vx,
+          vy: vy,
+          size: 3 + Math.random() * 5,
+          life: 0,
+          maxLife: 0.8,
+          color: '#ffd700'
+        });
+      }
+    }
+
+    // Actualizar partículas
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.vy += 0.15; // gravedad
+        p.vx *= 0.98;
+        p.vy *= 0.98;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life += 1 / 60; // asume 60 FPS
+        if (p.life >= p.maxLife) particles.splice(i, 1);
+      }
+    }
+
+    // Dibujar partículas
+    function drawParticles() {
+      for (const p of particles) {
+        ctx.globalAlpha = Math.max(0, 1 - p.life / p.maxLife);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Dibujar personaje con imagen
+    function drawPlayer() {
+      ctx.save();
+      ctx.translate(player.x, player.y);
+      
+      // Rotar según dirección (izquierda/derecha)
+      if (player.dx < 0) {
+        ctx.scale(-1, 1); // voltear horizontalmente
+      }
+      
+      // Animación de caminata (bobbing vertical)
+      let bobAmount = 0;
+      if (player.isMoving) {
+        bobAmount = Math.sin(player.animationCounter * 0.15) * 3;
+      }
+      
+      // Dibujar imagen con pies en el suelo
+      if (playerImg.complete && playerImg.width > 0) {
+        const imgWidth = 32;
+        const imgHeight = 32;
+        ctx.drawImage(playerImg, -imgWidth / 2, -imgHeight / 2 + bobAmount, imgWidth, imgHeight);
+      } else {
+        // Fallback: dibujar personaje simple (cabeza + cuerpo)
+        ctx.fillStyle = '#ff6b6b';
+        ctx.beginPath();
+        ctx.arc(0, -8, 8, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.fillStyle = '#ff8888';
+        ctx.fillRect(-6, 0 + bobAmount, 12, 14);
+        
+        // piernas con animación
+        const legOffset = Math.sin(player.animationCounter * 0.15) * 2;
+        ctx.fillStyle = '#4488ff';
+        ctx.fillRect(-4, 14 + bobAmount + legOffset, 4, 8);
+        ctx.fillRect(0, 14 + bobAmount - legOffset, 4, 8);
+      }
+      ctx.restore();
+    }
+
+    // Dibujar tesoro
+    function drawTreasure() {
+      ctx.save();
+      ctx.translate(treasure.x, treasure.y);
+      ctx.rotate(treasure.rotation);
+
+      // caja
+      ctx.fillStyle = '#8B4513';
+      ctx.fillRect(-treasure.size, -treasure.size * 0.6, treasure.size * 2, treasure.size * 1.2);
+      // tapa
+      ctx.fillStyle = '#A0522D';
+      ctx.beginPath();
+      ctx.arc(-treasure.size, -treasure.size * 0.6, treasure.size * 0.4, Math.PI, 0);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(treasure.size, -treasure.size * 0.6, treasure.size * 0.4, Math.PI, 0);
+      ctx.fill();
+      // monedas dentro (brillo)
+      ctx.fillStyle = '#FFD700';
+      ctx.fillRect(-treasure.size + 2, -treasure.size * 0.4, treasure.size * 2 - 4, treasure.size * 0.6);
+
+      ctx.restore();
+    }
+
+    // Control del teclado
+    const keys = {};
+    window.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      keys[e.key] = false;
+    });
+
+    // Actualizar movimiento
+    function updatePlayer() {
+      player.dx = 0;
+      player.dy = 0;
+      if (keys['ArrowUp'] || keys['w']) player.dy = -player.speed;
+      if (keys['ArrowDown'] || keys['s']) player.dy = player.speed;
+      if (keys['ArrowLeft'] || keys['a']) player.dx = -player.speed;
+      if (keys['ArrowRight'] || keys['d']) player.dx = player.speed;
+
+      // Determinar si se está moviendo
+      player.isMoving = player.dx !== 0 || player.dy !== 0;
+      
+      if (player.isMoving) {
+        player.animationCounter++;
+      } else {
+        player.animationCounter = 0;
+      }
+
+      player.x += player.dx;
+      player.y += player.dy;
+
+      // límites del canvas
+      player.x = Math.max(player.size, Math.min(canvas.width - player.size, player.x));
+      player.y = Math.max(player.size, Math.min(canvas.height - player.size, player.y));
+
+      // detectar colisión con tesoro
+      const dist = getDistance();
+      if (dist < player.size + treasure.size) {
+        gameWon = true;
+        spawnExplosion(treasure.x, treasure.y);
+        statusDiv.textContent = '¡Ganaste! Presiona F5 para jugar de nuevo.';
+      }
+    }
+
+    // Render
+    function render() {
+      // limpiar canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // dibujar fondo (opcional, ya está en CSS)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // dibujar grid opcional
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < canvas.width; i += 40) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, canvas.height);
+        ctx.stroke();
+      }
+      for (let i = 0; i < canvas.height; i += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, i);
+        ctx.lineTo(canvas.width, i);
+        ctx.stroke();
+      }
+
+      // dibujar personaje y tesoro
+      drawPlayer();
+      drawTreasure();
+      drawParticles();
+
+      // actualizar hint
+      const dist = getDistance();
+      hintDiv.textContent = `Distancia al tresor: ${Math.round(dist)} píxeles`;
+    }
+
+    // Loop del juego
+    function gameLoop() {
+      if (!gameWon) {
+        updatePlayer();
+        updateParticles();
+        treasure.rotation += 0.02; // animar tesoro
+      } else {
+        updateParticles();
+        treasure.rotation += 0.02;
+      }
+
+      render();
+      frameCount++;
+      requestAnimationFrame(gameLoop);
+    }
+
+    // iniciar
+    gameLoop();
+  </script>
+</body>
+</html>
